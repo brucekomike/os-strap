@@ -2,11 +2,12 @@
 # Batch download latest GitHub release packages for configured apps, for both
 # amd64 and arm64: .deb .rpm .exe .msi .dmg .pkg (host is not detected).
 # Usage: ./github-dl.sh [-d DEST_DIR] [-c CONFIG] [app ...]
+# Files go to DEST_DIR/<app>/ (default DEST_DIR: common/download).
 # Config lines: name owner/repo   (see apps.conf)
 set -eu
 
 DIR=$(cd "$(dirname "$0")" && pwd)
-DEST=.
+DEST=$DIR/download
 CONF=$DIR/apps.conf
 while getopts "d:c:" o; do
   case $o in
@@ -38,8 +39,14 @@ fetch() {
   [ -n "$urls" ] || { echo "$name: no matching assets" >&2; return 1; }
   for url in $urls; do
     file=$(basename "$url" | sed 's/%20/ /g')
+    mkdir -p "$DEST/$name"
+    if [ -s "$DEST/$name/$file" ]; then
+      echo "$name: $file (exists, skipped)"
+      continue
+    fi
     echo "$name: $file"
-    curl -fL --progress-bar -o "$DEST/$file" "$url"
+    curl -fL --progress-bar -o "$DEST/$name/$file.part" "$url"
+    mv "$DEST/$name/$file.part" "$DEST/$name/$file"
   done
 }
 
