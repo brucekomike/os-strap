@@ -17,19 +17,35 @@ done
 shift $((OPTIND - 1))
 mkdir -p "$DEST"
 
-ARCH=$(uname -m); OS=$(uname -s)
-export ARCH OS
+# Normalize to regex alternations matching asset naming conventions
+case $(uname -m) in
+  x86_64|amd64) ARCH='(x86_64|amd64|x64)' ;;
+  aarch64|arm64) ARCH='(aarch64|arm64)' ;;
+  *) ARCH=$(uname -m) ;;
+esac
+# Package format by platform: deb/rpm (Linux), dmg/pkg (macOS), exe/msi (Windows)
+case $(uname -s) in
+  Darwin) OS=macos; PKG='(dmg|pkg)' ;;
+  MINGW*|MSYS*|CYGWIN*) OS=windows; PKG='(exe|msi)' ;;
+  *)
+    OS=linux
+    if command -v dpkg >/dev/null 2>&1; then PKG=deb
+    elif command -v rpm >/dev/null 2>&1; then PKG=rpm
+    else PKG='(deb|rpm)'; fi ;;
+esac
+# Assets never wanted (signatures, variants)
+EXCLUDE='\.sig$|sciter|suse|fixed_webview2|signed'
 
 fetch() {
   name=$1; repo=$2; pat=$3
   # expand $ARCH/$OS placeholders in pattern
-  pat=$(printf '%s' "$pat" | sed "s/@ARCH@/$ARCH/g; s/@OS@/$OS/g")
+  pat=$(printf '%s' "$pat" | sed "s/@ARCH@/$ARCH/g; s/@OS@/$OS/g; s/@PKG@/$PKG/g")
   api="https://api.github.com/repos/$repo/releases/latest"
   auth=""
   [ -n "${GITHUB_TOKEN:-}" ] && auth="Authorization: Bearer $GITHUB_TOKEN"
   url=$(curl -fsSL ${auth:+-H "$auth"} "$api" \
     | grep -o '"browser_download_url": *"[^"]*"' | sed 's/.*: *"//; s/"$//' \
-    | grep -E -- "$pat" | head -n1)
+    | grep -Ev -- "$EXCLUDE" | grep -E -- "$pat" | head -n1)
   [ -n "$url" ] || { echo "$name: no asset matches $pat" >&2; return 1; }
   echo "$name: $url"
   curl -fL --progress-bar -o "$DEST/$(basename "$url")" "$url"
